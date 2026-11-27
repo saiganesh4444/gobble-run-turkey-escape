@@ -1,5 +1,7 @@
-/** Game configuration constants */
+/** Game configuration constants - Gobble Run: The Great Turkey Escape v1.1 */
 export const CONFIG = {
+  VERSION: '1.1.0',
+  TITLE: 'Gobble Run: The Great Turkey Escape',
   // Canvas
   WIDTH: 960,
   HEIGHT: 540,
