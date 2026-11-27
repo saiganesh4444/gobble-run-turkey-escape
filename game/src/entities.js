@@ -75,21 +75,27 @@ function drawTurkeyBody(ctx, w, h, ducking, bob, frame, wingAngle, legTimer) {
   ctx.fillRect(4 - legSwing, -2, 8, 3);
 
   // Tail feathers (fan shape)
-  const tailColors = ['#8B0000', '#B22222', '#CD853F', '#DAA520', '#FF8C00'];
-  for (let i = 0; i < 5; i++) {
+  const tailColors = ['#823d46', '#a94d45', '#ca7049', '#e2a253', '#f0bf70', '#d58b51', '#a45946'];
+  for (let i = 0; i < 7; i++) {
     ctx.save();
     ctx.translate(-w * 0.3, bodyY + bodyH * 0.25);
-    const angle = -0.6 + i * 0.3 + Math.sin(frame * 0.03 + i) * 0.05;
+    const angle = -1.15 + i * 0.32 + Math.sin(frame * 0.03 + i) * 0.04;
     ctx.rotate(angle);
     ctx.fillStyle = tailColors[i];
     ctx.beginPath();
     ctx.ellipse(0, -18, 5, 20, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.strokeStyle = '#422e39'; ctx.lineWidth = 0.8; ctx.stroke();
+    ctx.fillStyle = '#ffe0a3';
+    ctx.beginPath(); ctx.ellipse(0, -32, 3.8, 4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#62394177'; ctx.beginPath(); ctx.moveTo(0, -29); ctx.lineTo(0, -2); ctx.stroke();
     ctx.restore();
   }
 
   // Body
-  ctx.fillStyle = '#8B6914';
+  const bodyGradient = ctx.createLinearGradient(-20, bodyY, 20, 0);
+  bodyGradient.addColorStop(0, '#593c43'); bodyGradient.addColorStop(0.5, '#99634a'); bodyGradient.addColorStop(1, '#c9905b');
+  ctx.fillStyle = bodyGradient;
   ctx.beginPath();
   ctx.ellipse(0, bodyY + bodyH * 0.55 + bob, w * 0.4, bodyH * 0.4, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -168,6 +174,7 @@ export function createFarmer(x) {
     legTimer: 0,
     armAngle: 0,
     angry: false,
+    mode: 'ON YOUR TAIL',
     sprintTimer: 0,
   };
 }
@@ -342,31 +349,16 @@ export function drawObstacle(ctx, obs, frame) {
 
   switch (obs.type) {
     case 'knife':
-      ctx.rotate(obs.rotation);
-      // Blade
-      ctx.fillStyle = '#C0C0C0';
+      ctx.fillStyle = '#e2e9dd';
       ctx.beginPath();
-      ctx.moveTo(0, -obs.height / 2);
-      ctx.lineTo(obs.width / 3, obs.height / 6);
-      ctx.lineTo(-obs.width / 3, obs.height / 6);
-      ctx.closePath();
+      ctx.moveTo(-obs.width / 2, -7);
+      ctx.lineTo(obs.width / 2 - 14, -7);
+      ctx.lineTo(obs.width / 2 - 14, 7);
+      ctx.quadraticCurveTo(-obs.width / 2, 8, -obs.width / 2, -7);
       ctx.fill();
-      // Shine on blade
-      ctx.fillStyle = 'rgba(255,255,255,0.4)';
-      ctx.beginPath();
-      ctx.moveTo(-2, -obs.height / 2 + 4);
-      ctx.lineTo(2, -obs.height / 2 + 4);
-      ctx.lineTo(obs.width / 6, obs.height / 8);
-      ctx.closePath();
-      ctx.fill();
-      // Handle
-      ctx.fillStyle = '#5C4033';
-      ctx.fillRect(-obs.width / 4, obs.height / 6, obs.width / 2, obs.height / 3);
-      // Rivets
-      ctx.fillStyle = '#C0C0C0';
-      ctx.beginPath();
-      ctx.arc(0, obs.height / 4, 2, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(-obs.width / 2 + 3, -6, obs.width - 20, 2);
+      ctx.fillStyle = '#744137'; ctx.fillRect(obs.width / 2 - 14, -6, 14, 12);
+      ctx.fillStyle = '#e9bc7a'; ctx.fillRect(obs.width / 2 - 10, -2, 2, 2); ctx.fillRect(obs.width / 2 - 4, -2, 2, 2);
       break;
 
     case 'oven':

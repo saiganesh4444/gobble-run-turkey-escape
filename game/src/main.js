@@ -1,511 +1,237 @@
-/** Gobble Run: The Great Turkey Escape – Main game loop */
-
+/** Fixed-step escape loop, with fair hazards and a complete restartable campaign. */
 import { CONFIG, STAGES } from './config.js';
-import { initInput, jumpPressed, duckHeld, dashPressed, anyKeyPressed, clearFrame } from './input.js';
-import {
-  initAudio, resumeAudio, playGobble, playJump, playDoubleJump, playDash, playDuck,
-  playCorn, playWishbone, playHit, playCaught, playEscaped, playStageTransition,
-  playSelect, playFootstep, startMusic, stopMusic,
-} from './audio.js';
-import {
-  createTurkey, drawTurkey,
-  createFarmer, drawFarmer,
-  createObstacle, drawObstacle,
-  createCollectible, drawCollectible,
-} from './entities.js';
-import {
-  drawBackground, drawHUD, drawStageTransition,
-} from './renderer.js';
-import {
-  drawTitleScreen, drawGameOverScreen, drawVictoryScreen,
-} from './screens.js';
-import {
-  spawnFeathers, spawnLeaf, spawnDust, spawnSparks, spawnCelebration,
-  updateParticles, drawParticles, clearParticles,
-} from './particles.js';
+import { initInput, jumpPressed, duckHeld, dashPressed, anyKeyPressed, clearFrame, wasPressed } from './input.js';
+import * as audio from './audio.js';
+import { createTurkey, drawTurkey, createFarmer, drawFarmer, createObstacle, drawObstacle, createCollectible, drawCollectible } from './entities.js';
+import { drawBackground, drawHUD, drawStageTransition } from './renderer.js';
+import { drawTitleScreen, drawGameOverScreen, drawVictoryScreen, drawPauseScreen } from './screens.js';
+import { spawnFeathers, spawnDust, spawnCelebration, updateParticles, drawParticles, clearParticles } from './particles.js';
+import { panel, text, palette } from './art.js';
+import { updatePursuit } from './pursuit.js';
+import { readBest, saveBest } from './progress.js';
 
-// ---- Canvas setup ----
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
-canvas.width = CONFIG.WIDTH;
-canvas.height = CONFIG.HEIGHT;
-
-// ---- Game state ----
-let state = 'title'; // 'title' | 'playing' | 'stageTransition' | 'gameOver' | 'victory'
+canvas.width = CONFIG.WIDTH; canvas.height = CONFIG.HEIGHT;
+let state = 'title';
 let frame = 0;
-let turkey = null;
-let farmer = null;
-let obstacles = [];
-let collectibles = [];
-let scrollSpeed = CONFIG.BASE_SCROLL_SPEED;
-let scrollOffset = 0;
-let currentStage = 0;
-let obstacleTimer = 0;
-let collectibleTimer = 0;
-let stageTransitionTimer = 0;
-let stageTransitionName = '';
-let footstepTimer = 0;
-let leafTimer = 0;
-let screenShakeTimer = 0;
-let screenShakeIntensity = 0;
-
-// ---- Initialization ----
+let tick = 0;
+let turkey, farmer;
+let obstacles = [], collectibles = [], covers = [];
+let stage = 0, offset = 0, speed = 4, obstacleTimer = 90, coverTimer = 200, cornTimer = 60;
+let transition = 0, paused = false, hidden = false, shake = 0;
+let best = readBest();
+let stats = {};
+let hazardCount = 0;
 initInput();
 
-function resetGame() {
-  turkey = createTurkey();
-  farmer = createFarmer(-60);
-  obstacles = [];
-  collectibles = [];
-  scrollSpeed = CONFIG.BASE_SCROLL_SPEED;
-  scrollOffset = 0;
-  currentStage = 0;
-  obstacleTimer = 60;
-  collectibleTimer = 100;
-  stageTransitionTimer = 0;
-  footstepTimer = 0;
-  leafTimer = 0;
-  screenShakeTimer = 0;
-  clearParticles();
+function notify(message) { stats.notice = message; stats.noticeTimer = 100; }
+function startRun(practiceStage = null) {
+  audio.initAudio(); audio.resumeAudio(); audio.playGobble(); audio.startMusic('farm');
+  turkey = createTurkey(); farmer = createFarmer(35);
+  obstacles = []; collectibles = []; covers = []; clearParticles(); hazardCount = 0;
+  stage = 0; offset = 0; speed = 4; tick = 0;
+  obstacleTimer = 100; cornTimer = 50; coverTimer = 180; transition = 0; shake = 0; hidden = false;
+  stats = { corn: 0, streak: 0, dodges: 0, hits: 0, combo: 1, notice: '', noticeTimer: 0, best };
+  stats.practice = practiceStage !== null;
+  if (practiceStage !== null) {
+    stage = practiceStage;
+    turkey.distance = [0, 150, 330][stage];
+    audio.stopMusic(); audio.startMusic(STAGES[stage].music);
+    notify('PRACTICE RUN — Personal records disabled');
+  }
+  paused = false; state = 'playing'; frame = 0;
+  document.getElementById('pauseButton').textContent = 'Pause · P';
 }
-
-// ---- Collision detection ----
-function rectsOverlap(a, b) {
-  return (
-    a.x < b.x + b.width &&
-    a.x + a.width > b.x &&
-    a.y < b.y + b.height &&
-    a.y + a.height > b.y
-  );
+function finishRun(escaped, cause = '') {
+  state = escaped ? 'victory' : 'gameOver'; frame = 0;
+  if (!stats.practice) best = saveBest(turkey.score);
+  stats.best = best; stats.cause = cause;
+  audio.stopMusic();
+  if (escaped) { audio.playEscaped(); spawnCelebration(480, 250); }
+  else audio.playCaught();
 }
-
-function getTurkeyHitbox() {
-  const margin = 6;
-  return {
-    x: turkey.x + margin,
-    y: turkey.y + (turkey.ducking ? CONFIG.TURKEY_HEIGHT - CONFIG.TURKEY_DUCK_HEIGHT : 0) + margin,
-    width: turkey.width - margin * 2,
-    height: (turkey.ducking ? CONFIG.TURKEY_DUCK_HEIGHT : turkey.height) - margin * 2,
-  };
-}
-
-// ---- Stage management ----
-function getStageForDistance(d) {
-  if (d >= CONFIG.STAGE_3_DISTANCE) return 2;
-  if (d >= CONFIG.STAGE_2_DISTANCE) return 1;
-  return 0;
-}
-
-// ---- Obstacle spawning ----
-function spawnObstacle() {
-  const stage = STAGES[currentStage];
-  const types = stage.obstacles;
-  const type = types[Math.floor(Math.random() * types.length)];
-  const obs = createObstacle(type, CONFIG.WIDTH + 20 + Math.random() * 60);
-  if (obs) {
-    // Vary knife height more
-    if (obs.type === 'knife') {
-      const variant = Math.random();
-      if (variant < 0.3) {
-        // Low flying knife
-        obs.y = CONFIG.GROUND_Y - 30;
-        obs.flying = false;
-      } else if (variant < 0.6) {
-        // Mid height
-        obs.y = CONFIG.GROUND_Y - 60 - Math.random() * 20;
-      } else {
-        // High - must duck
-        obs.y = CONFIG.GROUND_Y - 90 - Math.random() * 30;
-      }
-    }
-    obstacles.push(obs);
-  }
-}
-
-function spawnCollectibleItem() {
-  const type = Math.random() < 0.85 ? 'corn' : 'wishbone';
-  collectibles.push(createCollectible(type, CONFIG.WIDTH + 20));
-}
-
-// ---- Update functions ----
-
-function updateTurkey() {
-  // Gravity
-  turkey.vy += CONFIG.GRAVITY;
-  turkey.y += turkey.vy;
-
-  // Ground check
-  const groundLevel = CONFIG.GROUND_Y - (turkey.ducking ? CONFIG.TURKEY_DUCK_HEIGHT : CONFIG.TURKEY_HEIGHT);
-  if (turkey.y >= groundLevel) {
-    if (!turkey.grounded) {
-      spawnDust(turkey.x + turkey.width / 2, CONFIG.GROUND_Y, 4);
-    }
-    turkey.y = groundLevel;
-    turkey.vy = 0;
-    turkey.grounded = true;
-    turkey.jumps = 0;
-  } else {
-    turkey.grounded = false;
-  }
-
-  // Jump
-  if (jumpPressed()) {
-    if (turkey.grounded || turkey.jumps === 0) {
-      turkey.vy = CONFIG.TURKEY_JUMP_FORCE;
-      turkey.grounded = false;
-      turkey.jumps = 1;
-      turkey.ducking = false;
-      playJump();
-    } else if (turkey.jumps === 1) {
-      turkey.vy = CONFIG.TURKEY_DOUBLE_JUMP_FORCE;
-      turkey.jumps = 2;
-      playDoubleJump();
-      spawnFeathers(turkey.x + turkey.width / 2, turkey.y + turkey.height / 2, 4);
-    }
-  }
-
-  // Duck
-  if (duckHeld() && turkey.grounded) {
-    if (!turkey.ducking) {
-      playDuck();
-    }
-    turkey.ducking = true;
-  } else {
-    turkey.ducking = false;
-  }
-
-  // Dash
-  if (dashPressed() && turkey.dashCooldown <= 0 && !turkey.dashing) {
-    turkey.dashing = true;
-    turkey.dashTimer = CONFIG.TURKEY_DASH_DURATION;
-    turkey.dashCooldown = CONFIG.TURKEY_DASH_COOLDOWN;
-    playDash();
-  }
-  if (turkey.dashing) {
-    turkey.dashTimer--;
-    if (turkey.dashTimer <= 0) turkey.dashing = false;
-  }
-  if (turkey.dashCooldown > 0) turkey.dashCooldown--;
-
-  // Invincibility
-  if (turkey.invincible > 0) turkey.invincible--;
-
-  // Animation
-  turkey.wingAngle += 0.15;
-  turkey.bobTimer++;
-  if (turkey.grounded && !turkey.ducking) {
-    turkey.legTimer += scrollSpeed * 0.5;
-  }
-
-  // Distance and score
-  const speedMul = turkey.dashing ? 1.8 : 1;
-  turkey.distance += scrollSpeed * 0.1 * speedMul;
-  turkey.score += CONFIG.DISTANCE_SCORE_RATE * scrollSpeed * 0.05;
-
-  // Footsteps
-  if (turkey.grounded && !turkey.ducking) {
-    footstepTimer += scrollSpeed;
-    if (footstepTimer > 30) {
-      playFootstep();
-      footstepTimer = 0;
-    }
-  }
-}
-
-function updateFarmer() {
-  farmer.legTimer += farmer.speed * 0.3;
-  farmer.armAngle += 0.08;
-
-  // Farmer slowly catches up based on stage
-  const targetX = turkey.x - 100 - currentStage * 10;
-  const farmerSpeed = CONFIG.FARMER_BASE_SPEED + currentStage * 0.5;
-
-  if (farmer.x < targetX) {
-    farmer.x += farmerSpeed * 0.3;
-  } else if (farmer.x > targetX + 20) {
-    farmer.x -= farmerSpeed * 0.1;
-  }
-
-  // Sprint occasionally in later stages
-  if (currentStage >= 1 && Math.random() < 0.002) {
-    farmer.sprintTimer = 60 + Math.random() * 60;
-  }
-  if (farmer.sprintTimer > 0) {
-    farmer.x += 1.5;
-    farmer.sprintTimer--;
-  }
-
-  // Keep farmer on screen
-  farmer.x = Math.max(-40, Math.min(turkey.x - 30, farmer.x));
-  farmer.y = CONFIG.GROUND_Y - CONFIG.FARMER_HEIGHT;
-}
-
-function updateObstacles() {
-  const effectiveSpeed = scrollSpeed * (turkey.dashing ? 1.8 : 1);
-
-  for (let i = obstacles.length - 1; i >= 0; i--) {
-    const obs = obstacles[i];
-    obs.x -= effectiveSpeed;
-
-    // Animate
-    if (obs.type === 'knife' && obs.flying !== false) {
-      obs.rotation += obs.rotSpeed;
-      obs.y += Math.sin(frame * 0.05 + obs.x * 0.01) * 0.5;
-    }
-    if (obs.type === 'oven') {
-      obs.glowTimer++;
-    }
-    if (obs.type === 'pumpkin') {
-      obs.bounce++;
-    }
-
-    // Remove off-screen
-    if (obs.x + obs.width < -50) {
-      obstacles.splice(i, 1);
-      continue;
-    }
-
-    // Collision
-    if (turkey.invincible <= 0 && !turkey.dashing) {
-      const hitbox = getTurkeyHitbox();
-      if (rectsOverlap(hitbox, obs)) {
-        turkey.lives--;
-        turkey.invincible = CONFIG.TURKEY_INVINCIBLE_TIME;
-        playHit();
-        spawnFeathers(turkey.x + turkey.width / 2, turkey.y + turkey.height / 2, 10);
-        screenShakeTimer = 15;
-        screenShakeIntensity = 4;
-
-        if (obs.type === 'oven') {
-          spawnSparks(obs.x + obs.width / 2, obs.y + obs.height / 2, 12);
-        }
-
-        obstacles.splice(i, 1);
-
-        if (turkey.lives <= 0) {
-          state = 'gameOver';
-          stopMusic();
-          playCaught();
-          frame = 0;
-          return;
-        }
-      }
-    }
-  }
-
-  // Spawn new obstacles
-  obstacleTimer--;
-  if (obstacleTimer <= 0) {
-    spawnObstacle();
-    const minI = Math.max(30, CONFIG.OBSTACLE_MIN_INTERVAL - currentStage * 10);
-    const maxI = Math.max(60, CONFIG.OBSTACLE_MAX_INTERVAL - currentStage * 20);
-    obstacleTimer = minI + Math.random() * (maxI - minI);
-  }
-}
-
-function updateCollectibles() {
-  const effectiveSpeed = scrollSpeed * (turkey.dashing ? 1.8 : 1);
-
-  for (let i = collectibles.length - 1; i >= 0; i--) {
-    const col = collectibles[i];
-    col.x -= effectiveSpeed;
-    col.bobTimer++;
-
-    // Remove off-screen
-    if (col.x + col.width < -20) {
-      collectibles.splice(i, 1);
-      continue;
-    }
-
-    // Collection
-    const hitbox = getTurkeyHitbox();
-    if (rectsOverlap(hitbox, col)) {
-      if (col.type === 'corn') {
-        turkey.score += CONFIG.CORN_SCORE;
-        playCorn();
-      } else {
-        turkey.score += CONFIG.WISHBONE_SCORE;
-        turkey.lives = Math.min(turkey.lives + 1, CONFIG.TURKEY_MAX_LIVES);
-        playWishbone();
-        spawnCelebration(col.x + col.width / 2, col.y + col.height / 2);
-      }
-      collectibles.splice(i, 1);
-    }
-  }
-
-  // Spawn collectibles
-  collectibleTimer--;
-  if (collectibleTimer <= 0) {
-    spawnCollectibleItem();
-    collectibleTimer = CONFIG.COLLECTIBLE_MIN_INTERVAL + Math.random() * (CONFIG.COLLECTIBLE_MAX_INTERVAL - CONFIG.COLLECTIBLE_MIN_INTERVAL);
-  }
-}
-
-// ---- Main game loop ----
-
-function update() {
-  frame++;
-
-  if (state === 'title') {
-    if (anyKeyPressed()) {
-      initAudio();
-      resumeAudio();
-      playSelect();
-      playGobble();
-      resetGame();
-      state = 'playing';
-      startMusic('farm');
-    }
-    return;
-  }
-
-  if (state === 'gameOver' || state === 'victory') {
-    if (frame > 60 && anyKeyPressed()) {
-      resumeAudio();
-      playSelect();
-      resetGame();
-      state = 'playing';
-      startMusic('farm');
-      frame = 0;
-    }
-    return;
-  }
-
-  if (state === 'stageTransition') {
-    stageTransitionTimer--;
-    if (stageTransitionTimer <= 0) {
-      state = 'playing';
-      startMusic(STAGES[currentStage].music);
-    }
-    return;
-  }
-
-  // ---- Playing state ----
-
-  // Update scroll speed
-  scrollSpeed = Math.min(CONFIG.MAX_SCROLL_SPEED, CONFIG.BASE_SCROLL_SPEED + turkey.distance * CONFIG.SPEED_INCREASE_RATE);
-  scrollOffset += scrollSpeed;
-
-  // Update entities
-  updateTurkey();
-  if (state !== 'playing') return; // Might have changed to gameOver
-  updateFarmer();
-  updateObstacles();
+function togglePause() {
   if (state !== 'playing') return;
-  updateCollectibles();
-
-  // Check victory
-  if (turkey.distance >= CONFIG.ESCAPE_DISTANCE) {
-    state = 'victory';
-    stopMusic();
-    playEscaped();
-    spawnCelebration(CONFIG.WIDTH / 2, CONFIG.HEIGHT / 2);
-    frame = 0;
-    return;
-  }
-
-  // Check stage transitions
-  const newStage = getStageForDistance(turkey.distance);
-  if (newStage !== currentStage) {
-    currentStage = newStage;
-    stageTransitionName = STAGES[currentStage].name;
-    stageTransitionTimer = 90;
-    state = 'stageTransition';
-    stopMusic();
-    playStageTransition();
-  }
-
-  // Spawn leaves
-  leafTimer++;
-  if (leafTimer > 40) {
-    spawnLeaf(CONFIG.WIDTH);
-    leafTimer = 0;
-  }
-
-  // Screen shake
-  if (screenShakeTimer > 0) screenShakeTimer--;
-
-  // Particles
-  updateParticles();
-
-  clearFrame();
+  paused = !paused; clearFrame();
+  document.getElementById('pauseButton').textContent = paused ? 'Resume · P' : 'Pause · P';
+  if (paused) audio.stopMusic(); else { audio.resumeAudio(); audio.startMusic(STAGES[stage].music); }
 }
+function toggleSound() {
+  const muted = audio.toggleMute();
+  const button = document.getElementById('soundButton');
+  button.textContent = muted ? 'Sound off · M' : 'Sound on · M';
+  button.setAttribute('aria-pressed', String(muted));
+}
+document.getElementById('pauseButton').onclick = togglePause;
+document.getElementById('soundButton').onclick = toggleSound;
+for (const button of document.querySelectorAll('[data-practice]')) {
+  button.onclick = () => { startRun(Number(button.dataset.practice)); clearFrame(); };
+}
+window.addEventListener('blur', () => { if (!paused && state === 'playing') togglePause(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && !paused && state === 'playing') togglePause(); });
 
+function overlaps(a, b) {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+function hitbox() {
+  return { x: turkey.x + 7, y: turkey.y + 6, width: turkey.width - 14, height: turkey.height - 10 };
+}
+function updateTurkey() {
+  // Keep the feet anchored when changing the duck collider.
+  const height = duckHeld() && turkey.grounded ? CONFIG.TURKEY_DUCK_HEIGHT : CONFIG.TURKEY_HEIGHT;
+  turkey.y += turkey.height - height; turkey.height = height; turkey.ducking = height === CONFIG.TURKEY_DUCK_HEIGHT;
+  if (jumpPressed() && turkey.jumps < 2) {
+    turkey.y += turkey.height - CONFIG.TURKEY_HEIGHT; turkey.height = CONFIG.TURKEY_HEIGHT; turkey.ducking = false;
+    turkey.vy = turkey.jumps === 0 ? -13 : -11; turkey.jumps++; turkey.grounded = false;
+    audio.playJump(); spawnFeathers(turkey.x, turkey.y + 20, 3);
+  }
+  turkey.vy += CONFIG.GRAVITY; turkey.y += turkey.vy;
+  if (turkey.y + turkey.height >= CONFIG.GROUND_Y) {
+    if (!turkey.grounded) spawnDust(turkey.x, 420, 4);
+    turkey.y = CONFIG.GROUND_Y - turkey.height; turkey.vy = 0; turkey.grounded = true; turkey.jumps = 0;
+  }
+  if (dashPressed() && turkey.dashCooldown <= 0) {
+    turkey.dashTimer = 22; turkey.dashCooldown = 115; audio.playDash(); spawnFeathers(turkey.x, turkey.y + 20, 5);
+  }
+  turkey.dashing = turkey.dashTimer > 0;
+  turkey.dashTimer = Math.max(0, turkey.dashTimer - 1);
+  turkey.dashCooldown = Math.max(0, turkey.dashCooldown - 1);
+  turkey.invincible = Math.max(0, turkey.invincible - 1);
+  turkey.bobTimer++; turkey.wingAngle += 0.15; turkey.legTimer += turkey.grounded ? speed * 0.5 : 0;
+  turkey.distance += speed * 0.025 * (turkey.dashing ? 1.8 : 1);
+  turkey.score += speed * 0.05;
+}
+function spawnHazard() {
+  // Predictable height classes preserve a visible, learnable dodge window.
+  const types = STAGES[stage].obstacles;
+  const intro = stage === 2 ? ['oven', 'knife'] : ['haybale', 'knife'];
+  const type = intro[hazardCount] || types[Math.floor(Math.random() * types.length)];
+  hazardCount++;
+  const obstacle = createObstacle(type, 1000);
+  if (obstacle.type === 'knife') {
+    obstacle.y = Math.random() < 0.5 ? 366 : 390;
+    obstacle.width = 44; obstacle.height = 16;
+    obstacle.rotation = 0; obstacle.flying = false;
+  }
+  obstacles.push(obstacle);
+}
+function hurt(obstacle) {
+  turkey.lives--; turkey.invincible = 110; farmer.x = Math.min(60, farmer.x + 18);
+  stats.hits++; stats.combo = 1; stats.streak = 0; shake = 12;
+  audio.playHit(); spawnFeathers(turkey.x, turkey.y + 20, 12);
+  notify(obstacle.type === 'oven' ? 'TOO HOT! Jump or dash through ovens.' : 'FEATHERS RUFFLED! Dash to recover.');
+  if (turkey.lives <= 0) finishRun(false, obstacle.type === 'oven' ? 'The kitchen got too hot. Jump the next oven.' : 'Three feathers down. There is always another route.');
+}
+function updateWorld() {
+  const travel = speed * (turkey.dashing ? 1.8 : 1);
+  offset += travel;
+  for (const obstacle of obstacles) {
+    obstacle.x -= travel;
+    if (!obstacle.passed && !obstacle.hit && obstacle.x + obstacle.width < turkey.x) {
+      obstacle.passed = true; stats.dodges++; turkey.score += 15;
+      if (stats.dodges % 5 === 0) notify(`${stats.dodges} CLEAN DODGES  +75`);
+    }
+    if (!obstacle.hit && !turkey.dashing && turkey.invincible <= 0 && overlaps(hitbox(), obstacle)) {
+      obstacle.hit = true; hurt(obstacle);
+      if (state !== 'playing') return;
+    }
+  }
+  obstacles = obstacles.filter(item => item.x > -100);
+  for (const cover of covers) cover.x -= travel;
+  covers = covers.filter(item => item.x > -180);
+  hidden = turkey.ducking && covers.some(cover => turkey.x + 24 > cover.x && turkey.x + 24 < cover.x + cover.width);
+  for (const item of collectibles) {
+    item.x -= travel; item.bobTimer++;
+    if (!item.collected && overlaps(hitbox(), item)) {
+      item.collected = true;
+      if (item.type === 'corn') {
+        stats.corn++; stats.streak++; stats.combo = Math.min(5, 1 + Math.floor(stats.streak / 4));
+        turkey.score += 50 * stats.combo; audio.playCorn();
+      } else {
+        turkey.lives = Math.min(3, turkey.lives + 1); turkey.score += 200;
+        audio.playWishbone(); notify('A LITTLE LUCK  +1 HEART');
+      }
+    }
+  }
+  collectibles = collectibles.filter(item => item.x > -40 && !item.collected);
+  if (--obstacleTimer <= 0) {
+    spawnHazard(); obstacleTimer = 100 - stage * 13 + Math.random() * 28;
+  }
+  if (--cornTimer <= 0) {
+    const lucky = stats.corn > 0 && stats.corn % 8 === 0;
+    collectibles.push(createCollectible(lucky ? 'wishbone' : 'corn', 1020));
+    cornTimer = 57;
+  }
+  if (--coverTimer <= 0 && stage < 2) {
+    covers.push({ x: 1000, y: 360, width: 140, height: 60 }); coverTimer = 390;
+  }
+  if (updatePursuit(farmer, turkey, stage, tick, hidden)) finishRun(false, 'The farmer cornered you. Use SHIFT to gain ground.');
+}
+function update() {
+  if (wasPressed('KeyM')) toggleSound();
+  if (wasPressed('KeyP') || wasPressed('Escape')) togglePause();
+  if (paused) { if (anyKeyPressed()) togglePause(); return; }
+  frame++;
+  if (state === 'title' || state === 'gameOver' || state === 'victory') {
+    if ((state === 'title' || frame > 45) && anyKeyPressed()) startRun();
+    updateParticles(); return;
+  }
+  if (transition > 0) { transition--; return; }
+  tick++;
+  if (stats.noticeTimer > 0) stats.noticeTimer--;
+  speed = Math.min(6.8, 4 + turkey.distance * 0.005);
+  updateTurkey(); updateWorld(); updateParticles();
+  if (shake > 0) shake--;
+  if (state !== 'playing') return;
+  if (turkey.distance >= CONFIG.ESCAPE_DISTANCE) { turkey.score += 1000 + turkey.lives * 200; finishRun(true); return; }
+  const next = turkey.distance >= 330 ? 2 : turkey.distance >= 150 ? 1 : 0;
+  if (next !== stage) {
+    stage = next; transition = 100; obstacles = []; covers = []; collectibles = []; hazardCount = 0;
+    farmer.x = 35; obstacleTimer = 110; turkey.invincible = 110;
+    audio.stopMusic(); audio.playStageTransition(); audio.startMusic(STAGES[stage].music);
+  }
+}
+function drawCover(cover) {
+  panel(ctx, cover.x, cover.y, cover.width, cover.height, '#b8894d', 12);
+  ctx.strokeStyle = '#e6b85e'; ctx.lineWidth = 2;
+  for (let y = cover.y + 8; y < 420; y += 8) { ctx.beginPath(); ctx.moveTo(cover.x + 5, y); ctx.lineTo(cover.x + cover.width - 5, y - 3); ctx.stroke(); }
+  text(ctx, '↓ HIDE', cover.x + cover.width / 2, cover.y - 15, 12, palette.gold, 'center');
+}
 function draw() {
   ctx.save();
-
-  // Screen shake
-  if (screenShakeTimer > 0) {
-    const shakeX = (Math.random() - 0.5) * screenShakeIntensity;
-    const shakeY = (Math.random() - 0.5) * screenShakeIntensity;
-    ctx.translate(shakeX, shakeY);
-  }
-
-  if (state === 'title') {
-    drawTitleScreen(ctx, frame);
-    ctx.restore();
-    return;
-  }
-
-  if (state === 'gameOver') {
-    // Show frozen game behind overlay
-    drawBackground(ctx, currentStage, scrollOffset, frame);
-    drawParticles(ctx);
-    for (const col of collectibles) drawCollectible(ctx, col, frame);
-    for (const obs of obstacles) drawObstacle(ctx, obs, frame);
-    drawTurkey(ctx, turkey, frame);
+  if (state === 'title') drawTitleScreen(ctx, frame, best);
+  else if (state === 'victory') drawVictoryScreen(ctx, turkey.score, frame, stats);
+  else {
+    if (shake > 0) ctx.translate(Math.sin(frame * 5) * 3, Math.cos(frame * 4) * 2);
+    drawBackground(ctx, stage, offset, frame);
+    for (const cover of covers) drawCover(cover);
+    for (const item of collectibles) drawCollectible(ctx, item, frame);
+    for (const obstacle of obstacles) {
+      drawObstacle(ctx, obstacle, frame);
+      text(ctx, obstacle.type === 'knife' ? (obstacle.y < 380 ? '↓ DUCK' : '↑ JUMP') : obstacle.type === 'oven' ? 'HOT! ↑ / SHIFT' : '↑ JUMP', obstacle.x + obstacle.width / 2, obstacle.y - 18, 11, '#fff0cc', 'center');
+    }
     drawFarmer(ctx, farmer, frame);
-    drawGameOverScreen(ctx, turkey.score, turkey.distance, frame);
+    ctx.save(); if (hidden) ctx.globalAlpha = 0.35;
+    // The sprite uses its standing dimensions while the collider changes for ducking.
+    drawTurkey(ctx, { ...turkey, y: 420 - CONFIG.TURKEY_HEIGHT + (turkey.y + turkey.height - 420), height: CONFIG.TURKEY_HEIGHT }, frame);
     ctx.restore();
-    return;
-  }
-
-  if (state === 'victory') {
-    drawVictoryScreen(ctx, turkey.score, frame);
     drawParticles(ctx);
-    ctx.restore();
-    return;
+    drawHUD(ctx, turkey, stage, farmer, stats, hidden, tick);
+    if (transition > 0) drawStageTransition(ctx, STAGES[stage].name, 1 - transition / 100);
+    if (state === 'gameOver') drawGameOverScreen(ctx, turkey.score, turkey.distance, frame, stats);
   }
-
-  // ---- Draw playing / stageTransition ----
-  drawBackground(ctx, currentStage, scrollOffset, frame);
-
-  // Particles behind entities
-  drawParticles(ctx);
-
-  // Collectibles
-  for (const col of collectibles) {
-    drawCollectible(ctx, col, frame);
-  }
-
-  // Obstacles
-  for (const obs of obstacles) {
-    drawObstacle(ctx, obs, frame);
-  }
-
-  // Farmer (behind turkey if far left)
-  drawFarmer(ctx, farmer, frame);
-
-  // Turkey
-  drawTurkey(ctx, turkey, frame);
-
-  // HUD
-  drawHUD(ctx, turkey, currentStage, scrollSpeed);
-
-  // Stage transition overlay
-  if (state === 'stageTransition') {
-    const progress = 1 - stageTransitionTimer / 90;
-    drawStageTransition(ctx, stageTransitionName, progress);
-  }
-
+  if (paused) drawPauseScreen(ctx);
   ctx.restore();
+  canvas.dataset.state = paused ? 'paused' : state;
+  canvas.dataset.stage = String(stage);
+  canvas.dataset.distance = String(Math.floor(turkey?.distance || 0));
+  document.getElementById('practiceMenu').hidden = state === 'playing';
 }
-
-// ---- Animation loop ----
-function gameLoop() {
-  update();
-  draw();
-  requestAnimationFrame(gameLoop);
+let previous = 0, accumulator = 0;
+function loop(now) {
+  accumulator += Math.min(100, now - (previous || now)); previous = now;
+  while (accumulator >= 1000 / 60) { update(); clearFrame(); accumulator -= 1000 / 60; }
+  draw(); requestAnimationFrame(loop);
 }
-
-gameLoop();
+requestAnimationFrame(loop);

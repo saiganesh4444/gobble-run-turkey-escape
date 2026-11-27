@@ -18,6 +18,10 @@ export function initInput() {
   window.addEventListener('keyup', (e) => {
     keys[e.code] = false;
   });
+  window.addEventListener('blur', () => {
+    for (const key in keys) keys[key] = false;
+    clearFrame();
+  });
 
   // Mouse/touch support for jump
   const canvas = document.getElementById('gameCanvas');

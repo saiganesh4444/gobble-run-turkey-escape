@@ -7,6 +7,13 @@ let sfxGain = null;
 let musicOsc = null;
 let musicInterval = null;
 let initialized = false;
+let muted = false;
+
+export function toggleMute() {
+  muted = !muted;
+  if (masterGain) masterGain.gain.value = muted ? 0 : 0.5;
+  return muted;
+}
 
 /** Initialize audio context on first user interaction */
 export function initAudio() {
@@ -14,7 +21,7 @@ export function initAudio() {
   try {
     ctx = new (window.AudioContext || window.webkitAudioContext)();
     masterGain = ctx.createGain();
-    masterGain.gain.value = 0.5;
+    masterGain.gain.value = muted ? 0 : 0.5;
     masterGain.connect(ctx.destination);
 
     musicGain = ctx.createGain();

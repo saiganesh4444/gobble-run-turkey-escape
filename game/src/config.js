@@ -1,6 +1,6 @@
 /** Game configuration constants - Gobble Run: The Great Turkey Escape v1.1 */
 export const CONFIG = {
-  VERSION: '1.1.0',
+  VERSION: '2.0.0',
   TITLE: 'Gobble Run: The Great Turkey Escape',
   // Canvas
   WIDTH: 960,
@@ -52,9 +52,9 @@ export const CONFIG = {
 
   // Stages
   STAGE_1_DISTANCE: 0,       // Farmyard
-  STAGE_2_DISTANCE: 1500,    // Barn
-  STAGE_3_DISTANCE: 3500,    // Kitchen
-  ESCAPE_DISTANCE: 5500,     // Freedom!
+  STAGE_2_DISTANCE: 150,     // Barn
+  STAGE_3_DISTANCE: 330,     // Kitchen
+  ESCAPE_DISTANCE: 550,     // Freedom!
 
   // Spawn rates (frames between spawns)
   OBSTACLE_MIN_INTERVAL: 55,
