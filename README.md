@@ -1,6 +1,6 @@
 # Gobble Run — The Great Turkey Escape
 
-A complete, original, offline browser game. Escape the farmyard, hide in the old barn, and survive the Thanksgiving kitchen to reach the woods. All art is drawn by the game's canvas code, and all music and effects are synthesized locally.
+A complete, original, offline browser game. Escape the farmyard, hide in the old barn, and survive the Thanksgiving kitchen to reach the woods. The painted scenes and characters are bundled locally. Character movement, hazards, and effects are animated in canvas, while music and effects are synthesized locally.
 
 ## Play
 
@@ -36,7 +36,7 @@ node main.ts
 
 In a POSIX shell use `MAKEFUN_OUTPUT_DIR=out node main.ts`.
 
-The competition runs this program twice with no network. Repeated runs write identical files. The game uses only local ES modules and CSS, with no external fonts, images, libraries, or services.
+The competition runs this program twice with no network. Repeated runs write identical files. The game uses local ES modules, CSS, and bundled artwork, with no external services.
 
 ## Source
 

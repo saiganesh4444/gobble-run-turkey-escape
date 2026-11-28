@@ -1,6 +1,8 @@
 /** Game entities: Turkey, Farmer, Obstacles, Collectibles */
 
 import { CONFIG } from './config.js';
+const turkeyArt = document.getElementById('turkeyArt');
+const farmerArt = document.getElementById('farmerArt');
 
 // ---- TURKEY ----
 
@@ -29,6 +31,35 @@ export function createTurkey() {
 }
 
 export function drawTurkey(ctx, turkey, frame) {
+  if (turkeyArt.complete && turkeyArt.naturalWidth) {
+    if (turkey.invincible > 0 && Math.floor(turkey.invincible / 4) % 2 === 0) return;
+    const feet = turkey.y + turkey.height;
+    const stride = Math.sin(turkey.legTimer * 0.3) * 12;
+    ctx.save();
+    ctx.translate(turkey.x + turkey.width / 2, feet);
+    if (turkey.dashing) {
+      ctx.globalAlpha = 0.28;
+      ctx.drawImage(turkeyArt, -86, -80, 90, 72);
+      ctx.globalAlpha = 1;
+    }
+    ctx.strokeStyle = '#a95a1c';
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    for (const side of [-1, 1]) {
+      const swing = stride * side;
+      ctx.beginPath();
+      ctx.moveTo(side * 7, -17);
+      ctx.lineTo(side * 8 + swing * 0.4, -7);
+      ctx.lineTo(side * 10 + swing, -1);
+      ctx.lineTo(side * 10 + swing + 9, -1);
+      ctx.stroke();
+    }
+    const crouch = turkey.ducking ? 15 : 0;
+    const bob = turkey.grounded ? Math.sin(turkey.bobTimer * 0.3) * 2 : -3;
+    ctx.drawImage(turkeyArt, -64, -86 + crouch + bob, 92, 88 - crouch);
+    ctx.restore();
+    return;
+  }
   const { x, y, width, height, ducking, dashing, invincible, wingAngle, legTimer } = turkey;
   
   // Flash when invincible
@@ -180,6 +211,25 @@ export function createFarmer(x) {
 }
 
 export function drawFarmer(ctx, farmer, frame) {
+  if (farmerArt.complete && farmerArt.naturalWidth) {
+    const stride = Math.sin(farmer.legTimer * 0.25) * 13;
+    ctx.save();
+    ctx.translate(farmer.x + farmer.width / 2, farmer.y + farmer.height);
+    ctx.strokeStyle = '#263b4c';
+    ctx.lineWidth = 12;
+    ctx.lineCap = 'round';
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(side * 13, -19);
+      ctx.lineTo(side * 13 + stride * side, -3);
+      ctx.stroke();
+      ctx.fillStyle = '#382a25';
+      ctx.fillRect(side * 13 + stride * side - 7, -3, 19, 7);
+    }
+    ctx.drawImage(farmerArt, -52, -86 + Math.sin(frame * 0.3) * 2, 105, 77);
+    ctx.restore();
+    return;
+  }
   const { x, y, width, height, legTimer, armAngle } = farmer;
 
   ctx.save();

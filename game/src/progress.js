@@ -1,6 +1,9 @@
 /** Personal records are optional so private browsing and file URLs still play. */
 export function readBest() {
-  try { return Math.max(0, Number(localStorage.getItem('gobble-run-best')) || 0); }
+  try {
+    const stored = Number(localStorage.getItem('gobble-run-best'));
+    return Number.isFinite(stored) ? Math.max(0, Math.floor(stored)) : 0;
+  }
   catch { return 0; }
 }
 export function saveBest(score) {

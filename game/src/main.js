@@ -12,6 +12,9 @@ import { readBest, saveBest } from './progress.js';
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
+const pauseButton = document.getElementById('pauseButton');
+const soundButton = document.getElementById('soundButton');
+const practiceMenu = document.getElementById('practiceMenu');
 canvas.width = CONFIG.WIDTH; canvas.height = CONFIG.HEIGHT;
 let state = 'title';
 let frame = 0;
@@ -23,29 +26,31 @@ let transition = 0, paused = false, hidden = false, shake = 0;
 let best = readBest();
 let stats = {};
 let hazardCount = 0;
+let wishboneReady = false;
 initInput();
 
 function notify(message) { stats.notice = message; stats.noticeTimer = 100; }
 function startRun(practiceStage = null) {
-  audio.initAudio(); audio.resumeAudio(); audio.playGobble(); audio.startMusic('farm');
+  audio.initAudio(); audio.resumeAudio(); audio.playGobble();
   turkey = createTurkey(); farmer = createFarmer(35);
   obstacles = []; collectibles = []; covers = []; clearParticles(); hazardCount = 0;
   stage = 0; offset = 0; speed = 4; tick = 0;
   obstacleTimer = 100; cornTimer = 50; coverTimer = 180; transition = 0; shake = 0; hidden = false;
-  stats = { corn: 0, streak: 0, dodges: 0, hits: 0, combo: 1, notice: '', noticeTimer: 0, best };
+  wishboneReady = false;
+  stats = { corn: 0, streak: 0, dodges: 0, closeCalls: 0, hits: 0, combo: 1, notice: '', noticeTimer: 0, best };
   stats.practice = practiceStage !== null;
   if (practiceStage !== null) {
     stage = practiceStage;
     turkey.distance = [0, 150, 330][stage];
-    audio.stopMusic(); audio.startMusic(STAGES[stage].music);
     notify('PRACTICE RUN — Personal records disabled');
   }
   paused = false; state = 'playing'; frame = 0;
-  document.getElementById('pauseButton').textContent = 'Pause · P';
+  pauseButton.textContent = 'Pause · P';
+  audio.startMusic(STAGES[stage].music);
 }
 function finishRun(escaped, cause = '') {
   state = escaped ? 'victory' : 'gameOver'; frame = 0;
-  if (!stats.practice) best = saveBest(turkey.score);
+  if (!stats.practice) best = saveBest(Math.max(best, turkey.score));
   stats.best = best; stats.cause = cause;
   audio.stopMusic();
   if (escaped) { audio.playEscaped(); spawnCelebration(480, 250); }
@@ -54,19 +59,18 @@ function finishRun(escaped, cause = '') {
 function togglePause() {
   if (state !== 'playing') return;
   paused = !paused; clearFrame();
-  document.getElementById('pauseButton').textContent = paused ? 'Resume · P' : 'Pause · P';
+  pauseButton.textContent = paused ? 'Resume · P' : 'Pause · P';
   if (paused) audio.stopMusic(); else { audio.resumeAudio(); audio.startMusic(STAGES[stage].music); }
 }
 function toggleSound() {
   const muted = audio.toggleMute();
-  const button = document.getElementById('soundButton');
-  button.textContent = muted ? 'Sound off · M' : 'Sound on · M';
-  button.setAttribute('aria-pressed', String(muted));
+  soundButton.textContent = muted ? 'Sound off · M' : 'Sound on · M';
+  soundButton.setAttribute('aria-pressed', String(muted));
 }
-document.getElementById('pauseButton').onclick = togglePause;
-document.getElementById('soundButton').onclick = toggleSound;
+pauseButton.onclick = () => { togglePause(); canvas.focus(); };
+soundButton.onclick = () => { toggleSound(); canvas.focus(); };
 for (const button of document.querySelectorAll('[data-practice]')) {
-  button.onclick = () => { startRun(Number(button.dataset.practice)); clearFrame(); };
+  button.onclick = () => { startRun(Number(button.dataset.practice)); clearFrame(); canvas.focus(); };
 }
 window.addEventListener('blur', () => { if (!paused && state === 'playing') togglePause(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden && !paused && state === 'playing') togglePause(); });
@@ -83,8 +87,11 @@ function updateTurkey() {
   turkey.y += turkey.height - height; turkey.height = height; turkey.ducking = height === CONFIG.TURKEY_DUCK_HEIGHT;
   if (jumpPressed() && turkey.jumps < 2) {
     turkey.y += turkey.height - CONFIG.TURKEY_HEIGHT; turkey.height = CONFIG.TURKEY_HEIGHT; turkey.ducking = false;
-    turkey.vy = turkey.jumps === 0 ? -13 : -11; turkey.jumps++; turkey.grounded = false;
-    audio.playJump(); spawnFeathers(turkey.x, turkey.y + 20, 3);
+    const doubleJump = turkey.jumps === 1;
+    turkey.vy = doubleJump ? CONFIG.TURKEY_DOUBLE_JUMP_FORCE : CONFIG.TURKEY_JUMP_FORCE;
+    turkey.jumps++; turkey.grounded = false;
+    if (doubleJump) audio.playDoubleJump(); else audio.playJump();
+    spawnFeathers(turkey.x, turkey.y + 20, 3);
   }
   turkey.vy += CONFIG.GRAVITY; turkey.y += turkey.vy;
   if (turkey.y + turkey.height >= CONFIG.GROUND_Y) {
@@ -123,19 +130,42 @@ function hurt(obstacle) {
   notify(obstacle.type === 'oven' ? 'TOO HOT! Jump or dash through ovens.' : 'FEATHERS RUFFLED! Dash to recover.');
   if (turkey.lives <= 0) finishRun(false, obstacle.type === 'oven' ? 'The kitchen got too hot. Jump the next oven.' : 'Three feathers down. There is always another route.');
 }
+function resolveHazard(obstacle, player) {
+  if (obstacle.hit || obstacle.passed) return;
+  if (obstacle.x + obstacle.width <= player.x) {
+    obstacle.passed = true;
+    if (obstacle.shielded) return;
+    stats.dodges++;
+    turkey.score += 15;
+    if (obstacle.closeCall) {
+      stats.closeCalls++;
+      turkey.score += 60;
+      notify('FEATHER CLOSE!  +75');
+    }
+    return;
+  }
+  if (obstacle.x >= player.x + player.width) return;
+  const clearance = Math.max(obstacle.y - (player.y + player.height), player.y - (obstacle.y + obstacle.height));
+  if (clearance >= 0) {
+    if (clearance <= 18 && !turkey.dashing && !turkey.invincible) obstacle.closeCall = true;
+    return;
+  }
+  if (turkey.dashing || turkey.invincible) {
+    obstacle.closeCall = false;
+    obstacle.shielded = true;
+    return;
+  }
+  obstacle.hit = true;
+  hurt(obstacle);
+}
 function updateWorld() {
   const travel = speed * (turkey.dashing ? 1.8 : 1);
+  const player = hitbox();
   offset += travel;
   for (const obstacle of obstacles) {
     obstacle.x -= travel;
-    if (!obstacle.passed && !obstacle.hit && obstacle.x + obstacle.width < turkey.x) {
-      obstacle.passed = true; stats.dodges++; turkey.score += 15;
-      if (stats.dodges % 5 === 0) notify(`${stats.dodges} CLEAN DODGES  +75`);
-    }
-    if (!obstacle.hit && !turkey.dashing && turkey.invincible <= 0 && overlaps(hitbox(), obstacle)) {
-      obstacle.hit = true; hurt(obstacle);
-      if (state !== 'playing') return;
-    }
+    resolveHazard(obstacle, player);
+    if (state !== 'playing') return;
   }
   obstacles = obstacles.filter(item => item.x > -100);
   for (const cover of covers) cover.x -= travel;
@@ -143,14 +173,17 @@ function updateWorld() {
   hidden = turkey.ducking && covers.some(cover => turkey.x + 24 > cover.x && turkey.x + 24 < cover.x + cover.width);
   for (const item of collectibles) {
     item.x -= travel; item.bobTimer++;
-    if (!item.collected && overlaps(hitbox(), item)) {
+    if (!item.collected && overlaps(player, item)) {
       item.collected = true;
       if (item.type === 'corn') {
         stats.corn++; stats.streak++; stats.combo = Math.min(5, 1 + Math.floor(stats.streak / 4));
+        if (stats.corn % 8 === 0) wishboneReady = true;
         turkey.score += 50 * stats.combo; audio.playCorn();
       } else {
-        turkey.lives = Math.min(3, turkey.lives + 1); turkey.score += 200;
-        audio.playWishbone(); notify('A LITTLE LUCK  +1 HEART');
+        const healed = turkey.lives < CONFIG.TURKEY_MAX_LIVES;
+        turkey.lives = Math.min(CONFIG.TURKEY_MAX_LIVES, turkey.lives + 1);
+        turkey.score += CONFIG.WISHBONE_SCORE;
+        audio.playWishbone(); notify(healed ? 'WISHBONE  +1 HEART  +200' : 'WISHBONE  +200');
       }
     }
   }
@@ -159,8 +192,8 @@ function updateWorld() {
     spawnHazard(); obstacleTimer = 100 - stage * 13 + Math.random() * 28;
   }
   if (--cornTimer <= 0) {
-    const lucky = stats.corn > 0 && stats.corn % 8 === 0;
-    collectibles.push(createCollectible(lucky ? 'wishbone' : 'corn', 1020));
+    collectibles.push(createCollectible(wishboneReady ? 'wishbone' : 'corn', 1020));
+    wishboneReady = false;
     cornTimer = 57;
   }
   if (--coverTimer <= 0 && stage < 2) {
@@ -188,7 +221,7 @@ function update() {
   const next = turkey.distance >= 330 ? 2 : turkey.distance >= 150 ? 1 : 0;
   if (next !== stage) {
     stage = next; transition = 100; obstacles = []; covers = []; collectibles = []; hazardCount = 0;
-    farmer.x = 35; obstacleTimer = 110; turkey.invincible = 110;
+    farmer.x = 35; farmer.searchTicks = 0; obstacleTimer = 110; turkey.invincible = 0; hidden = false;
     audio.stopMusic(); audio.playStageTransition(); audio.startMusic(STAGES[stage].music);
   }
 }
@@ -223,15 +256,25 @@ function draw() {
   }
   if (paused) drawPauseScreen(ctx);
   ctx.restore();
-  canvas.dataset.state = paused ? 'paused' : state;
-  canvas.dataset.stage = String(stage);
-  canvas.dataset.distance = String(Math.floor(turkey?.distance || 0));
-  document.getElementById('practiceMenu').hidden = state === 'playing';
+  const visibleState = paused ? 'paused' : state;
+  if (canvas.dataset.state !== visibleState) {
+    canvas.dataset.state = visibleState;
+    practiceMenu.hidden = state === 'playing';
+    pauseButton.disabled = state !== 'playing';
+  }
+  const stageNumber = String(stage);
+  const metres = String(Math.floor(turkey?.distance || 0));
+  if (canvas.dataset.stage !== stageNumber) canvas.dataset.stage = stageNumber;
+  if (canvas.dataset.distance !== metres) canvas.dataset.distance = metres;
 }
 let previous = 0, accumulator = 0;
 function loop(now) {
   accumulator += Math.min(100, now - (previous || now)); previous = now;
-  while (accumulator >= 1000 / 60) { update(); clearFrame(); accumulator -= 1000 / 60; }
-  draw(); requestAnimationFrame(loop);
+  // At high refresh rates, draw only when the 60 Hz simulation has a new frame.
+  if (accumulator >= 1000 / 60) {
+    do { update(); clearFrame(); accumulator -= 1000 / 60; } while (accumulator >= 1000 / 60);
+    draw();
+  }
+  requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
