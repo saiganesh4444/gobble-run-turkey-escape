@@ -244,10 +244,9 @@ function draw() {
       drawObstacle(ctx, obstacle, frame);
       text(ctx, obstacle.type === 'knife' ? (obstacle.y < 380 ? '↓ DUCK' : '↑ JUMP') : obstacle.type === 'oven' ? 'HOT! ↑ / SHIFT' : '↑ JUMP', obstacle.x + obstacle.width / 2, obstacle.y - 18, 11, '#fff0cc', 'center');
     }
-    drawFarmer(ctx, farmer, frame);
+    drawFarmer(ctx, farmer);
     ctx.save(); if (hidden) ctx.globalAlpha = 0.35;
-    // The sprite uses its standing dimensions while the collider changes for ducking.
-    drawTurkey(ctx, { ...turkey, y: 420 - CONFIG.TURKEY_HEIGHT + (turkey.y + turkey.height - 420), height: CONFIG.TURKEY_HEIGHT }, frame);
+    drawTurkey(ctx, turkey, frame);
     ctx.restore();
     drawParticles(ctx);
     drawHUD(ctx, turkey, stage, farmer, stats, hidden, tick);

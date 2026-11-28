@@ -1,12 +1,19 @@
 /** Title and result screens use the same live artwork as the game. */
 import { drawAutumnScene, panel, text, palette } from './art.js';
-import { createTurkey, createFarmer, drawTurkey, drawFarmer, drawObstacle } from './entities.js';
+import { createTurkey, createFarmer, drawTurkey, drawFarmer } from './entities.js';
 
-function hero(ctx, frame, x, y, scale) {
+function hero(ctx, frame, x, groundY, scale, running = true) {
   const turkey = createTurkey();
-  turkey.bobTimer = frame; turkey.legTimer = frame; turkey.wingAngle = frame * 0.1;
-  ctx.save(); ctx.translate(x, y); ctx.scale(scale, scale);
-  turkey.x = 0; turkey.y = 0; drawTurkey(ctx, turkey, frame); ctx.restore();
+  turkey.bobTimer = frame;
+  turkey.legTimer = running ? frame : 0;
+  turkey.wingAngle = frame * 0.1;
+  turkey.x = -turkey.width / 2;
+  turkey.y = -turkey.height;
+  ctx.save();
+  ctx.translate(x, groundY);
+  ctx.scale(scale, scale);
+  drawTurkey(ctx, turkey, frame);
+  ctx.restore();
 }
 
 export function drawTitleScreen(ctx, frame, best = 0) {
@@ -22,10 +29,17 @@ export function drawTitleScreen(ctx, frame, best = 0) {
   panel(ctx, 48, 366, 252, 51, palette.gold);
   text(ctx, 'START ESCAPE   →', 174, 392, 19, palette.ink, 'center');
   text(ctx, 'SPACE / ENTER / CLICK TO START', 49, 437, 11, '#d8bc9f');
-  hero(ctx, frame, 630, 272, 2.6);
-  const farmer = createFarmer(0); farmer.legTimer = frame;
-  ctx.save(); ctx.translate(820, 301); ctx.scale(1.35, 1.35); farmer.x = 0; farmer.y = 0; drawFarmer(ctx, farmer, frame); ctx.restore();
-  text(ctx, '“I am absolutely a salad person.”', 775, 166, 14, palette.cream, 'center', 'Georgia');
+  const farmer = createFarmer(0);
+  farmer.legTimer = frame;
+  farmer.x = -farmer.width / 2;
+  farmer.y = -farmer.height;
+  ctx.save();
+  ctx.translate(568, 420);
+  ctx.scale(1.4, 1.4);
+  drawFarmer(ctx, farmer);
+  ctx.restore();
+  hero(ctx, frame, 796, 420, 2.65);
+  text(ctx, '“I am absolutely a salad person.”', 786, 142, 14, palette.cream, 'center', 'Georgia');
   panel(ctx, 30, 478, 900, 42, '#241e2be8');
   text(ctx, 'SPACE  jump ×2     ↓ / S  duck & hide     SHIFT / X  dash     P  pause     M  sound', 480, 499, 13, palette.cream, 'center');
   if (best) text(ctx, `PERSONAL BEST  ${best}`, 908, 40, 12, palette.gold, 'right');
@@ -52,8 +66,7 @@ function drawResult(ctx, escaped, score, distance, frame, stats) {
   panel(ctx, 120, 391, 271, 47, palette.gold);
   text(ctx, 'RUN AGAIN   →', 255, 415, 17, palette.ink, 'center');
   text(ctx, 'SPACE / ENTER / CLICK', 426, 415, 12, '#d9bcaa');
-  hero(ctx, frame, 685, 284, 2.2);
-  if (!escaped) drawObstacle(ctx, { type: 'oven', x: 684, y: 360, width: 90, height: 65 }, frame);
+  hero(ctx, frame, 738, 410, 2.2, false);
 }
 
 export function drawPauseScreen(ctx) {
