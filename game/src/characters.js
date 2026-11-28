@@ -1,4 +1,4 @@
-/** Join the animated lower legs to the painted bodies. Coordinates are relative to the ground. */
+/** Draw the painted characters relative to the ground line. */
 import { CONFIG } from './config.js';
 
 const TAU = 2 * Math.PI;
@@ -86,117 +86,22 @@ export function drawPaintedTurkey(ctx, art, turkey) {
   ctx.restore();
 }
 
-function farmerTrouserLeg(ctx, art, hipX, hipY, ankleX, soleY, rear) {
-  const ankleY = soleY - 6;
-  const dx = ankleX - hipX;
-  const dy = ankleY - hipY;
-  const distance = Math.hypot(dx, dy);
-  // Bend the knee forward between the hip and the planted or swinging foot.
-  const bend = Math.sqrt(Math.max(0, 21 ** 2 - (distance / 2) ** 2));
-  const kneeX = hipX + dx / 2 + dy / distance * bend;
-  const kneeY = hipY + dy / 2 - dx / distance * bend;
-
-  const denim = ctx.createLinearGradient(kneeX - 11, kneeY, kneeX + 9, kneeY);
-  denim.addColorStop(0, rear ? '#222c31' : '#28363b');
-  denim.addColorStop(0.64, rear ? '#364650' : '#405564');
-  denim.addColorStop(1, rear ? '#465250' : '#626959');
-  ctx.fillStyle = denim;
-  ctx.strokeStyle = '#242425';
-  ctx.lineWidth = 1.35;
-  ctx.lineJoin = 'round';
-  ctx.beginPath();
-  ctx.moveTo(hipX - 12, hipY - 7);
-  ctx.quadraticCurveTo(kneeX - 10, kneeY - 5, kneeX - 7, kneeY + 2);
-  ctx.lineTo(ankleX - 6, ankleY);
-  ctx.quadraticCurveTo(ankleX, ankleY + 3, ankleX + 6, ankleY);
-  ctx.quadraticCurveTo(kneeX + 7, kneeY + 7, kneeX + 9, kneeY + 2);
-  ctx.quadraticCurveTo(kneeX + 10, kneeY - 4, hipX + 10, hipY - 8);
-  ctx.closePath();
-  ctx.fill();
-  // Reuse the painted denim grain to blend the moving legs into the bib.
-  const left = Math.min(hipX - 12, kneeX - 10, ankleX - 6);
-  const right = Math.max(hipX + 10, kneeX + 10, ankleX + 6);
-  ctx.save();
-  ctx.clip();
-  ctx.globalAlpha *= rear ? 0.34 : 0.55;
-  ctx.drawImage(art, 33, 313, 22, 24, left, hipY - 8, right - left, ankleY - hipY + 12);
-  ctx.restore();
-  ctx.stroke();
-
-  ctx.lineCap = 'round';
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = rear ? '#8b785a' : '#bc9c68';
-  ctx.beginPath();
-  ctx.moveTo(hipX - 6, hipY - 4);
-  ctx.quadraticCurveTo(kneeX - 6, kneeY - 3, kneeX - 3, kneeY + 2);
-  ctx.lineTo(ankleX - 3, ankleY - 1);
-  ctx.stroke();
-  ctx.lineWidth = 3.4;
-  ctx.strokeStyle = rear ? '#85745a' : '#b49a72';
-  ctx.beginPath();
-  ctx.moveTo(ankleX - 4.6, ankleY - 0.8);
-  ctx.quadraticCurveTo(ankleX, ankleY + 1.3, ankleX + 4.6, ankleY - 0.7);
-  ctx.stroke();
-}
-
-function farmerBoot(ctx, ankleX, soleY, rear) {
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  ctx.save();
-  ctx.translate(ankleX, soleY);
-  ctx.beginPath();
-  ctx.moveTo(-4.5, -8.2);
-  ctx.quadraticCurveTo(0, -9, 3.2, -7.5);
-  ctx.quadraticCurveTo(4.6, -5.4, 9, -4.4);
-  ctx.quadraticCurveTo(13.8, -3.6, 12.7, -0.8);
-  ctx.quadraticCurveTo(5.6, 0.1, -5.1, -0.7);
-  ctx.quadraticCurveTo(-6.3, -3.3, -4.5, -8.2);
-  ctx.closePath();
-  const leather = ctx.createLinearGradient(0, -9, 0, -1);
-  leather.addColorStop(0, rear ? '#936b47' : '#b88652');
-  leather.addColorStop(1, rear ? '#503728' : '#65412b');
-  ctx.fillStyle = leather;
-  ctx.fill();
-  ctx.strokeStyle = '#342721';
-  ctx.lineWidth = 1.2;
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(3, -5.1);
-  ctx.lineTo(6, -4.3);
-  ctx.strokeStyle = '#e0b581';
-  ctx.lineWidth = 0.85;
-  ctx.stroke();
-  ctx.restore();
-}
-
 export function drawPaintedFarmer(ctx, art, farmer) {
-  const phase = (farmer.legTimer * 0.18) % TAU;
-  const bob = -2 * Math.sin(phase) ** 2;
+  const columns = 4;
+  const rows = 2;
+  const frame = Math.floor(farmer.legTimer * 0.17) % (columns * rows);
+  const cellWidth = art.naturalWidth / columns;
+  const cellHeight = art.naturalHeight / rows;
+  const height = 108;
+  const width = height * cellWidth / cellHeight;
+  // The atlas frames share the same ground line, seven pixels above the cell edge.
+  const ground = height * (cellHeight - 7) / cellHeight;
+
   ctx.save();
   ctx.translate(farmer.x + farmer.width / 2, farmer.y + farmer.height);
-  shadow(ctx, -12, 29, 0.38);
-  for (const rear of [true, false]) {
-    const hipX = rear ? -29 : -20;
-    const hipY = (rear ? -40 : -39) + bob;
-    const [swing, rise] = stride(phase + (rear ? Math.PI : 0), 19, 14);
-    const ankleX = hipX + 5 + swing;
-    farmerBoot(ctx, ankleX, rise, rear);
-    farmerTrouserLeg(ctx, art, hipX, hipY, ankleX, rise, rear);
-  }
-
-  // Preserve the painted waist and pockets while hiding the fixed pose below them.
-  ctx.save();
-  ctx.translate(-48, -99 + bob);
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(98, 0);
-  ctx.lineTo(98, 63);
-  ctx.lineTo(57, 62);
-  ctx.bezierCurveTo(49, 62, 44, 69, 33, 68);
-  ctx.quadraticCurveTo(19, 66, 0, 57);
-  ctx.closePath();
-  ctx.clip();
-  ctx.drawImage(art, 0, 0, 98, 89);
-  ctx.restore();
+  shadow(ctx, -4, 26, 0.38);
+  ctx.drawImage(art,
+    (frame % columns) * cellWidth, Math.floor(frame / columns) * cellHeight,
+    cellWidth, cellHeight, -width / 2 + 4, -ground, width, height);
   ctx.restore();
 }
