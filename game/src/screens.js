@@ -25,7 +25,7 @@ export function drawTitleScreen(ctx, frame, best = 0) {
   hero(ctx, frame, 630, 272, 2.6);
   const farmer = createFarmer(0); farmer.legTimer = frame;
   ctx.save(); ctx.translate(820, 301); ctx.scale(1.35, 1.35); farmer.x = 0; farmer.y = 0; drawFarmer(ctx, farmer, frame); ctx.restore();
-  text(ctx, '“I am absolutely a salad person.”', 730, 227, 14, palette.cream, 'center', 'Georgia');
+  text(ctx, '“I am absolutely a salad person.”', 775, 166, 14, palette.cream, 'center', 'Georgia');
   panel(ctx, 30, 478, 900, 42, '#241e2be8');
   text(ctx, 'SPACE  jump ×2     ↓ / S  duck & hide     SHIFT / X  dash     P  pause     M  sound', 480, 499, 13, palette.cream, 'center');
   if (best) text(ctx, `PERSONAL BEST  ${best}`, 908, 40, 12, palette.gold, 'right');
@@ -36,7 +36,7 @@ export function drawGameOverScreen(ctx, score, distance, frame, stats = {}) {
 }
 
 export function drawVictoryScreen(ctx, score, frame, stats = {}) {
-  drawAutumnScene(ctx, 0, 1400, frame);
+  drawAutumnScene(ctx, 3, 1400, frame, false);
   drawResult(ctx, true, score, 550, frame, stats);
 }
 

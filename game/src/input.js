@@ -5,6 +5,8 @@ const justPressed = {};
 
 export function initInput() {
   window.addEventListener('keydown', (e) => {
+    // Native menu buttons activate once with Space/Enter without also jumping.
+    if (e.target?.tagName === 'BUTTON' && (e.code === 'Space' || e.code === 'Enter')) return;
     if (!keys[e.code]) {
       justPressed[e.code] = true;
     }
@@ -23,24 +25,23 @@ export function initInput() {
     clearFrame();
   });
 
-  // Mouse/touch support for jump
+  // Pointer capture keeps held controls consistent even when released outside the canvas.
   const canvas = document.getElementById('gameCanvas');
-  canvas.addEventListener('mousedown', (e) => {
-    justPressed['Mouse'] = true;
-    keys['Mouse'] = true;
-  });
-  canvas.addEventListener('mouseup', () => {
-    keys['Mouse'] = false;
-  });
-  canvas.addEventListener('touchstart', (e) => {
+  const mouseActions = ['Mouse', 'MouseDash', 'MouseDuck'];
+  canvas.addEventListener('pointerdown', (e) => {
+    const action = mouseActions[e.button];
+    if (!action) return;
     e.preventDefault();
-    justPressed['Mouse'] = true;
-    keys['Mouse'] = true;
+    canvas.focus({ preventScroll: true });
+    canvas.setPointerCapture(e.pointerId);
+    justPressed[action] = true;
+    keys[action] = true;
   });
-  canvas.addEventListener('touchend', (e) => {
-    e.preventDefault();
-    keys['Mouse'] = false;
-  });
+  const releaseMouse = () => { for (const action of mouseActions) keys[action] = false; };
+  canvas.addEventListener('pointerup', releaseMouse);
+  canvas.addEventListener('pointercancel', releaseMouse);
+  canvas.addEventListener('lostpointercapture', releaseMouse);
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
 /** Check if a key is currently held */
@@ -63,11 +64,11 @@ export function jumpPressed() {
 }
 
 export function duckHeld() {
-  return isDown('ArrowDown') || isDown('KeyS');
+  return isDown('ArrowDown') || isDown('KeyS') || isDown('MouseDuck');
 }
 
 export function dashPressed() {
-  return wasPressed('ShiftLeft') || wasPressed('ShiftRight') || wasPressed('KeyX');
+  return wasPressed('ShiftLeft') || wasPressed('ShiftRight') || wasPressed('KeyX') || wasPressed('MouseDash');
 }
 
 export function anyKeyPressed() {
